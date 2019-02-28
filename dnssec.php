@@ -8,26 +8,87 @@ require_once __DIR__.'/config.php';
 
 echo "\r\nNovoServe's DNSSEC Utility\r\n\r\n";
 
-$domains = explode("\n", $domains);
+$domains = preg_split('/\r\n|\r|\n/', $domains);
 foreach($domains as $domain) {
+
+    // Get all data from Openprovider and check if it exists;
+    $getDomainData = getDomainData($domain);
+    if ($getDomainData === false) {
+        echo 'DNSSEC failed for domain: '.$domain.' (domain not present at Openprovider)'."\r\n";
+        continue;
+    }
+
+    // Check if the domain is using our nameservers;
+    if (!isUsingNovoServe($getDomainData, $nameservers)) {
+        echo 'DNSSEC failed for domain: '.$domain.' (domain not using our nameservers)'."\r\n";
+        continue;
+    }
+
+    // Check if the domain is currently using DNSSEC at Openprovider;
+    if (isset($getDomainData['dnssecKeys'][0])) {
+        echo "DNSSEC failed for domain: ".$domain." (domain is already using DNSSEC)\r\n";
+        continue;
+    }
+
+    // Get DNSSEC information from our nameservers;
 	$getDnssec = getDnssec($domain);
 	if (!$getDnssec) {
 		$createDnssec = createDnssec($domain);
 		if (!$createDnssec) {
-			echo "DNSSEC failed for domain: ".$domain."\r\n";
+			echo "DNSSEC failed for domain: ".$domain." (failed to create keys)\r\n";
 			continue;
 		}
+        $getDnssec = getDnssec($domain);
 	}
 
 	$crypto = explode(" ", $getDnssec[0]['dnskey']);
 	$setDnssec = setDnssec($domain, $getDnssec[0]['flags'], $crypto[2], $crypto[3]);
 	if ($setDnssec === true) {
 		echo "DNSSEC OK: ".$domain."\r\n";
-	}
+	} else {
+        echo "DNSSEC failed for domain: ".$domain." (failed to set keys)\r\n";
+    }
 	
 }
 
 echo "\r\nAll jobs done!\r\n\r\n";
+
+/*
+* getDomainData()
+* Get all information about a domain at Openprovider.
+*/
+function getDomainData($domain) {
+    $domain = explode('.', $domain);
+    $api = new OP_API('https://api.openprovider.eu');
+    $request = new OP_Request;
+    $request->setCommand('retrieveDomainRequest')
+    ->setAuth(array('username' => OPENPROVIDER_USER, 'password' => OPENPROVIDER_PASS))
+    ->setArgs(array('domain' => array(
+            'name' => $domain[0],
+            'extension' => $domain[1]
+        ),
+    'withAdditionalData' => 0
+    ));
+    $reply = $api->setDebug(0)->process($request);
+    $result = $reply->getValue();
+    if (isset($result['nameServers'][0]['name'])) {
+        return $result;
+    }
+    return false;
+}
+
+/*
+* isUsingNovoServe()
+* Check whether the domain is registered at Openprovider and if it's using our nameservers.
+*/
+function isUsingNovoServe($data, $nameservers) {
+    if (isset($data['nameServers'][0]['name'])) {
+        if (in_array($data['nameServers'][0]['name'], $nameservers)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 /*
 * getDnssec()
@@ -46,12 +107,38 @@ function getDnssec($domain) {
 
 /*
 * createDnssec()
-* Creates DNSSEC keys using the PowerDNS API, returns the keys if successful, else false.
+* Creates DNSSEC keys using the PowerDNS API, returns true if successful, else false.
 */
 function createDnssec($domain) {
-	$data = stream_context_create(["http" => ["method" => "POST", "header" => "Content-type: application/json\r\nX-API-Key: ".POWERDNS_API."\r\n"]]);
-	$query = file_get_contents('http://'.POWERDNS_SERVER.'/api/v1/servers/localhost/zones/'.$domain.'/cryptokeys', false, $data);
-	return json_decode($query, true);
+
+$curl = curl_init();
+
+curl_setopt_array($curl, array(
+  CURLOPT_URL => "http://".POWERDNS_SERVER."/api/v1/servers/localhost/zones/".$domain,
+  CURLOPT_RETURNTRANSFER => true,
+  CURLOPT_ENCODING => "",
+  CURLOPT_MAXREDIRS => 10,
+  CURLOPT_TIMEOUT => 30,
+  CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+  CURLOPT_CUSTOMREQUEST => "PUT",
+  CURLOPT_POSTFIELDS => "{\"dnssec\":true}",
+  CURLOPT_HTTPHEADER => array(
+    "Content-Type: application/json",
+    "X-API-Key: ".POWERDNS_API,
+    "cache-control: no-cache"
+  ),
+));
+
+$response = curl_exec($curl);
+$err = curl_error($curl);
+curl_close($curl);
+
+if (empty($response)) {
+    return true;
+} else {
+    return false;
+}
+
 }
 
 /*
