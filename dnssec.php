@@ -32,6 +32,14 @@ foreach($domains as $domain) {
 
     // Get DNSSEC information from our nameservers;
 	$getDnssec = getDnssec($domain);
+
+    // Remove all incorrect 256 flags and loop until OK;
+    while(isset($getDnssec[0]['flags']) && ($getDnssec[0]['flags'] == 256)) {
+        deleteDnssec($domain, $getDnssec[0]['id']);
+        $getDnssec = getDnssec($domain);
+    }
+
+    // Be sure DNSSEC data exists, or create it;
 	if (!$getDnssec) {
 		$createDnssec = createDnssec($domain);
 		if (!$createDnssec) {
@@ -103,6 +111,17 @@ function getDnssec($domain) {
 	} else {
 		return false;
 	}
+}
+
+/*
+* deleteDnssec()
+* Deletes DNSSEC data from the PowerDNS API, always returns true.
+*/
+function deleteDnssec($domain, $id) {
+    $data = stream_context_create(["http" => ["method" => "DELETE", "header" => "X-API-Key: ".POWERDNS_API]]);
+    $query = file_get_contents('http://'.POWERDNS_SERVER.'/api/v1/servers/localhost/zones/'.$domain.'/cryptokeys/'.$id, false, $data);
+    $json = json_decode($query, true);
+    return true;
 }
 
 /*
