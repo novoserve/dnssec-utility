@@ -1,7 +1,7 @@
 <?php
 /*
 * DNSSEC Utility
-* Coded by Tamerciaga @ NovoServe B.V.
+* Coded by Tamerciaga @ NovoServe B.V
 */
 
 require_once __DIR__.'/config.php';
