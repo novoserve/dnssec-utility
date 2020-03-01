@@ -10,6 +10,7 @@ define('OPENPROVIDER_USER', '');
 define('OPENPROVIDER_PASS', '');
 define('POWERDNS_API', '');
 define('POWERDNS_SERVER', '');
+define('SLEEP_TIMER', 1);
 
 $nameservers = array(
 	'ns1.example.com',

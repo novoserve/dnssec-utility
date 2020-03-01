@@ -1,3 +1,4 @@
+#!/usr/bin/php
 <?php
 /*
 * DNSSEC Utility
@@ -8,25 +9,27 @@ require_once __DIR__.'/config.php';
 
 echo "\r\nNovoServe's DNSSEC Utility\r\n\r\n";
 
-$domains = preg_split('/\r\n|\r|\n/', $domains);
+$domains = getDomainsWithoutDnssec();
 foreach($domains as $domain) {
+    // Be gentle to our upstream API's
+    sleep(SLEEP_TIMER);
 
     // Get all data from Openprovider and check if it exists;
     $getDomainData = getDomainData($domain);
     if ($getDomainData === false) {
-        echo 'DNSSEC failed for domain: '.$domain.' (domain not present at Openprovider)'."\r\n";
+        echo 'DNSSEC skipped for domain: '.$domain.' (domain not present at Openprovider)'."\r\n";
         continue;
     }
 
     // Check if the domain is using our nameservers;
     if (!isUsingNovoServe($getDomainData, $nameservers)) {
-        echo 'DNSSEC failed for domain: '.$domain.' (domain not using our nameservers)'."\r\n";
+        echo 'DNSSEC skipped for domain: '.$domain.' (domain not using our nameservers)'."\r\n";
         continue;
     }
 
     // Check if the domain is currently using DNSSEC at Openprovider;
     if (isset($getDomainData['dnssecKeys'][0])) {
-        echo "DNSSEC failed for domain: ".$domain." (domain is already using DNSSEC)\r\n";
+        echo "DNSSEC skipped for domain: ".$domain." (domain is already using DNSSEC)\r\n";
         continue;
     }
 
@@ -56,7 +59,7 @@ foreach($domains as $domain) {
 	} else {
         echo "DNSSEC failed for domain: ".$domain." (failed to set keys)\r\n";
     }
-	
+
 }
 
 echo "\r\nAll jobs done!\r\n\r\n";
@@ -96,6 +99,23 @@ function isUsingNovoServe($data, $nameservers) {
         }
     }
     return false;
+}
+
+/*
+* getDomainsWithoutDnssec()
+* Gets the current list of domains from the the PowerDNS API with DNSSEC disabled.
+*/
+function getDomainsWithoutDnssec() {
+        $domains = array();
+	$data = stream_context_create(["http" => ["method" => "GET", "header" => "X-API-Key: ".POWERDNS_API]]);
+	$query = file_get_contents('http://'.POWERDNS_SERVER.'/api/v1/servers/localhost/zones', false, $data);
+	$json = json_decode($query, true);
+	foreach($json as $domain) {
+		if(isset($domain['dnssec']) && !$domain['dnssec']) {
+			array_push($domains, rtrim($domain['id'], '.'));
+		}
+	}
+	return $domains;
 }
 
 /*
